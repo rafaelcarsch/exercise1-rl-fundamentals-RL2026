@@ -21,7 +21,7 @@ import sys
 
 
 # Parse script arguments
-def parse_args(args=sys.argv[1:]):
+def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--test", "-t", type=str, default=None,
                         help="Model to be tested")
@@ -35,12 +35,17 @@ def parse_args(args=sys.argv[1:]):
     parser.add_argument("--central_point", type=float, default=0.0,
                         help="Point x0 to fluctuate around")
     parser.add_argument("--random_policy", action='store_true', help="Applying a random policy training")
+    parser.add_argument("--learning_rate",type=float,default=1e-2)#new: learning rate
+    parser.add_argument("--episode_length",type=int,default=500)#new: episode length
+    parser.add_argument("--test_episodes", type=int, default=10)#new: number of test episodes   
+    parser.add_argument("--file", type=str, default=None) #new: add file argument
+    parser.add_argument("--reward", type=str, default=None) #new: add reward argument, specifying the reward approach
     return parser.parse_args(args)
 
 
 # Policy training function
 def train(agent, env, train_episodes, early_stop=True, render=False,
-          silent=False, train_run_id=0, x0=0, random_policy=False):
+          silent=False, train_run_id=0, x0=0, random_policy=False, reward_type=None):
     # Arrays to keep track of rewards
     reward_history, timestep_history = [], []
     average_reward_history = []
@@ -51,6 +56,7 @@ def train(agent, env, train_episodes, early_stop=True, render=False,
         done = False
         # Reset the environment and observe the initial state (it's a random initial state with small values)
         observation, _ = env.reset()
+
 
         # Loop until the episode is over
         while not done:
@@ -63,7 +69,7 @@ def train(agent, env, train_episodes, early_stop=True, render=False,
                 Sample a random action from the action space
                 """
                 # TODO
-                # ...
+                action = env.action_space.sample()
 
             previous_observation = observation
 
@@ -77,7 +83,8 @@ def train(agent, env, train_episodes, early_stop=True, render=False,
                 Use a different reward, overwriting the original one
             """
             # TODO
-            # reward = new_reward(observation, x0)
+            if reward_type is not None:
+                reward = new_reward(observation, x0, reward_type)
 
             # Store action's outcome (so that the agent can improve its policy)
             agent.store_outcome(previous_observation, action_probabilities, action, reward)
@@ -122,21 +129,23 @@ def train(agent, env, train_episodes, early_stop=True, render=False,
 
 
 # Function to test a trained policy
-def test(agent, env, episodes, render=False, x0=0):
+def test(agent, env, episodes, render=False, x0=0, episode_length=500, reward_type=None):
     test_reward, test_len = 0, 0
 
-    episodes = 100
     print('Num testing episodes:', episodes)
 
     for ep in range(episodes):
         done = False
+        timesteps = 0
         observation, _ = env.reset()
-        while not done:
+        osc = {"target": 1.8}
+        while not done and timesteps < episode_length:
         # Task 1.2
             """
             Test on 500 timesteps
             """
             # TODO
+            #Done by adding episode_length parameter
 
             action, _ = agent.get_action(observation, evaluation=True)  # Similar to the training loop above -
                                                                         # get the action, act on the environment, save total reward
@@ -150,38 +159,52 @@ def test(agent, env, episodes, render=False, x0=0):
                 Use a different reward, overwriting the original one
             """
             # TODO
-            # reward = new_reward(observation, x0)
+            if reward_type is not None:
+                reward = new_reward(observation, x0, reward_type)
 
             if render:
                 env.render()
             test_reward += reward
             test_len += 1
+            timesteps += 1
     print("Average test reward:", test_reward/episodes, "episode length:", test_len/episodes)
+    return test_reward/episodes
 
 
-def new_reward(state, x0):
+def new_reward(state, x0, type):
     # Task 3.1
     """
         Use a different reward, overwriting the original one
     """
     # TODO
-    # ...
-    reward = ...
-    
-    return reward
+    if type == "CASE1": #Case 1: reward +1 for each timestep, +0.5 for being close to the center
+        reward = 1 + 0.5/(1 + abs(state[0]))
+    elif type == "CASE2": #Case 2: reward +1 for each timestep, +0.5 for being close to x0
+        reward = 1 + 1/(1+abs(state[0]-x0))
+    elif type == "CASE3":
+        L = 1.8
+        x, v = state[0], state[1]
+        if abs(x) > L:
+            bonus = -np.sign(x) * v               
+        else:
+            bonus = max(abs(v) - 0.15, 0.0)
+        reward = 0.9 + 0.75 * np.clip(bonus, -1.0, 2.0)
+    else:
+        raise ValueError(f"Unknown reward: {type}")
+    return reward   
 
 # The main function
 def main(args):
     # Create a Gymnasium environment (CartPole-v1)
     render_mode = "human" if args.render_training or args.render_test else None
-    env = gym.make(args.env, render_mode=render_mode)
+    env = gym.make(args.env, render_mode=render_mode, )
 
     # Task 1.2
     """
     # For CartPole-v1 - change the maximum episode length to 1000
     """
     # TODO
-    env._max_episode_steps = 500
+    env._max_episode_steps = args.episode_length
 
     # Get dimensionalities of actions and observations
     action_space_dim = get_space_dim(env.action_space)
@@ -189,7 +212,7 @@ def main(args):
 
     # Instantiate agent and its policy
     policy = Policy(observation_space_dim, action_space_dim)
-    agent = Agent(policy)
+    agent = Agent(policy, args.learning_rate)
 
     # Print some stuff
     print("Environment:", args.env)
@@ -201,10 +224,11 @@ def main(args):
     # Otherwise load the policy from the file and go directly to testing.
     if args.test is None:
         # Train
-        training_history = train(agent, env, args.train_episodes, False, args.render_training, x0=args.central_point, random_policy=args.random_policy)
+        training_history = train(agent, env, args.train_episodes, False, args.render_training, x0=args.central_point, random_policy=args.random_policy, reward_type=args.reward)
 
         # Save the model
-        model_file = "%s_params.ai" % args.env
+        #model_file = "%s_params.ai" % args.env  
+        model_file = args.file if args.file is not None else "%s_params.ai" % args.env #new: args.file
         torch.save(policy.state_dict(), model_file)
         print("Model saved to", model_file)
 
@@ -221,11 +245,11 @@ def main(args):
         state_dict = torch.load(args.test)
         policy.load_state_dict(state_dict)
         print("Testing...")
-        test(agent, env, args.train_episodes, args.render_test)
+        global last_test_reward
+        last_test_reward = test(agent, env, args.test_episodes, args.render_test, args.central_point, args.episode_length, reward_type=args.reward)
 
 
 # Entry point of the script
 if __name__ == "__main__":
     args = parse_args()
     main(args)
-

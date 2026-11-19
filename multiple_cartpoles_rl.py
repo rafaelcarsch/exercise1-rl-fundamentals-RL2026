@@ -32,6 +32,7 @@ def parse_args(args=sys.argv[1:]):
     parser.add_argument("--render_training", action='store_true',
                         help="Render each frame during training. Will be slower.")
     parser.add_argument("--render_test", action='store_true', help="Render test")
+    parser.add_argument("--reward", type=str, default=None) #new: add reward argument, specifying the reward approach
     return parser.parse_args(args)
 
 
@@ -57,9 +58,15 @@ def trainer(fargs):
     agent = Agent(policy)
 
     training_history = train(agent, env, args.train_episodes, silent=True,
-                             train_run_id=trainer_id, early_stop=False)
+                             train_run_id=trainer_id, early_stop=False, reward_type=args.reward)
 
     print("Trainer id", trainer_id, "finished")
+
+    # Save the model
+    #model_file = "%s_params.ai" % args.env  
+    model_file = "Multiple_agents_params.ai"
+    torch.save(policy.state_dict(), model_file)
+    print("Model saved to", model_file)
 
     return training_history
 

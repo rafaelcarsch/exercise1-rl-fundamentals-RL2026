@@ -28,10 +28,10 @@ class Policy(torch.nn.Module):
 
 
 class Agent(object):
-    def __init__(self, policy):
+    def __init__(self, policy, learning_rate=1e-2):
         self.train_device = "cpu"  # ""cuda" if torch.cuda.is_available() else "cpu"
         self.policy = policy.to(self.train_device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=1e-2)
+        self.optimizer = torch.optim.Adam(policy.parameters(), lr=learning_rate)
         self.batch_size = 1
         self.gamma = 0.98
         # self.gamma = 1
@@ -44,7 +44,7 @@ class Agent(object):
         all_rewards = torch.stack(self.rewards, dim=0).to(self.train_device).squeeze(-1)
 
         self.observations, self.actions, self.rewards = [], [], []
-        discounted_rewards = discount_rewards(all_rewards, self.gamma)
+        discounted_rewards = discount_rewards(all_rewards, self.gamma) 
         discounted_rewards -= torch.mean(discounted_rewards)
         discounted_rewards /= torch.std(discounted_rewards)
 

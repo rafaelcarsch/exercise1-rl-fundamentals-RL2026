@@ -68,52 +68,110 @@ def apply_state_controller(K, x):
     else:
         return 0, u     # if force_dem <= 0 -> move cart left
 
-def multiple_R(env, mp, mk, l, g, time_sleep=False, terminate=True):
+def multiple_R(env, mp, mk, l, g, time_sleep=False, terminate=None, seed=None):
     """
-    Vary the value of R within the range [0.01, 0.1, 10, 100] and plot the forces 
+    Vary R within [0.01, 0.1, 10, 100] and plot applied forces
+    over the first 500 timesteps.
     """
-    #TODO: 
-    # ...
-    return
+
+    r_list = [0.01, 0.1, 10, 100]
+    forces = {}
+
+    A, B = linerized_cartpole_system(mp, mk, l, g)
+
+    for r_value in r_list:
+
+        # Reset environment with the same seed for comparability
+        obs, _ = env.reset(seed=seed)
+
+        # Calculate LQR controller
+        K = optimal_controller(A, B, R_value=r_value)
+
+        forces[r_value] = []
+
+        for i in range(500):
+
+            if env.render_mode == "human":
+                env.render()
+
+            if time_sleep:
+                time.sleep(0.1)
+
+            # Calculate action and desired force
+            action, force = apply_state_controller(K, obs)
+
+            # Clip force to environment limits
+            applied_force = float(np.clip(force, -10, 10))
+
+            # Set force magnitude
+            env.unwrapped.force_mag = abs(applied_force)
+
+            # Execute action
+            obs, reward, terminated, truncated, _ = env.step(action)
+
+            # Store signed applied force
+            forces[r_value].append(applied_force)
+
+            if terminated or truncated:
+                print(f"R = {r_value}: Episode ended at timestep {i+1}")
+                break
+
+        # Invert forces if the first force is positive
+        if forces[r_value] and forces[r_value][0] > 0:
+            forces[r_value] = [-f for f in forces[r_value]]
+
+    return forces
+
 
 def control(env, mp, mk, l, g, time_sleep=False, terminate=True, seed=None):
     """
     Control using LQR
     """
-    #TODO: plot the states of the system ...
+    obs, _ = env.reset(seed=seed)
 
-    obs, _ = env.reset(seed=seed)    # Reset the environment for a new episode
-    
     A, B = linerized_cartpole_system(mp, mk, l, g)
-    K = optimal_controller(A, B)    # Re-compute the optimal controller for the current R value
+    K = optimal_controller(A, B)
+
+    env._max_episode_steps = 1000
+
+    states = []
 
     for i in range(1000):
 
-        env.render()
+        if env.render_mode == "human":
+            env.render()
+
         if time_sleep:
             time.sleep(.1)
-        
-        # get force direction (action) and force value (force)
+
+        # Calculate action and force
         action, force = apply_state_controller(K, obs)
-        
-        # absolute value, since 'action' determines the sign, F_min = -10N, F_max = 10N
+
+        # Clip force
         abs_force = abs(float(np.clip(force, -10, 10)))
-        
-        # change magnitute of the applied force in CartPole
+
+        # Apply force magnitude
         env.unwrapped.force_mag = abs_force
 
-        # apply action
+        # Execute action
         obs, reward, terminated, truncated, _ = env.step(action)
-        done = terminated or truncated
-        
-        if terminate and done:
-            print(f'Terminated after {i+1} iterations.')
-            break
 
+        # Store observation
+        states.append(obs.copy())
+
+        done = terminated or truncated
+
+        if done:
+            print(f'Episode ended after {i+1} total iterations.')
+
+            if terminate:
+                break
+
+    return states
 # The main function
 def main(args):
     # Create a Gymnasium environment (CartPole-v1)
-    env = gym.make(args.env, render_mode="human")
+    env = gym.make(args.env, render_mode="None")
 
     # Get dimensionalities of actions and observations
     action_space_dim = get_space_dim(env.action_space)
@@ -130,11 +188,13 @@ def main(args):
     mp, mk, l, g = pole.masspole, pole.masscart, pole.length, pole.gravity
 
     if args.mode == "control":
-        control(env, mp, mk, l, g, args.time_sleep, terminate=True, seed=args.seed)
+        states_or_forces = control(env, mp, mk, l, g, args.time_sleep, terminate=False, seed=args.seed)
     elif args.mode == "multiple_R":
-        multiple_R(env, mp, mk, l, g, args.time_sleep, terminate=True)
+        states_or_forces = multiple_R(env, mp, mk, l, g, args.time_sleep, terminate=False, seed=args.seed)
 
     env.close()
+
+    return states_or_forces
 
 # Entry point of the script
 if __name__ == "__main__":
